@@ -1,0 +1,6 @@
+; $Id$
+name = Development
+description = ...
+package = Development
+files[] = development.module
+core = 7.x

@@ -1,0 +1,15 @@
+<?php
+// $Id$
+
+/**
+ * Implements hook_upgrade_info().
+ */
+function development_upgrade_info() {
+  ini_set('display_errors', 1);
+  drupal_set_time_limit(0);
+  $upgrade = array(
+    'title' => t('SimpleTest remove t() from assert message, test getInfo(), etc (parser routines)'),
+    'link' => 'http://drupal.org/node/500866',
+  );
+  return array('development' => $upgrade);
+}
