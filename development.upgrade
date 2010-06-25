@@ -136,7 +136,7 @@ function development_convert_asserts(&$item, &$reader, &$name) {
 
   // Check if the function call is a recognized assertion.
   if (!empty($params)) {
-    // Cycle through the parameter indexes to check, based on the assertion
+    // Cycle through the parameter indices to check, based on the assertion
     // format, and run the message extraction process.
     foreach ($params as $param) {
       development_extract_message($item, $param);
@@ -160,17 +160,35 @@ function development_extract_message($item, $index) {
 
       if ($operand->parameters->count() > 1) {
         $string = $operand->printParameter();
-        $delimitor = $string[0];
+        $delimiter = $string[0];
 
         $args = development_get_value($operand, $operand->getParameter(1)->getElement());
-        $i = 0;
-//         cdp($args->print_r());
-        while ($key = $args->getKey($i)) {
-          $key = str_replace(array("'", '"'), '', $key->toString());
-//           $value = development_get_value($args->getValue($i))->toString();
-          $value = $args->getValue($i)->toString();
-          $string = str_replace($key, "$delimitor . " . $value . " . $delimitor", $string);
-          $i++;
+        if (is_a($args, 'PGPAssignment')) {
+          $variable = $operand->getParameter(1)->getElement()->stripComments()->toString();
+
+          $expression = $args->values->getElement();
+          $replacements = $expression->getType('operand', 2); // The operand after the assignment operator.
+          if ($replacements) {
+            $i = 0;
+            while ($key = $replacements->getKey($i)) {
+//              cdp($key, '$key');
+              $key = str_replace(array("'", '"'), '', $key->toString());
+              $value = "{$variable}['$key']"; // $value = $replacements->getValue($i)->toString();
+//              cdp($value, '$value');
+              $string = str_replace($key, "$delimiter . " . $value . " . $delimiter", $string);
+              $i++;
+            }
+          }
+        }
+        elseif (method_exists($args, 'getKey')) {
+          $i = 0;
+          while ($key = $args->getKey($i)) {
+//            cdp($key, '$key');
+            $key = str_replace(array("'", '"'), '', $key->toString());
+            $value = $args->getValue($i)->toString();
+            $string = str_replace($key, "$delimiter . " . $value . " . $delimiter", $string);
+            $i++;
+          }
         }
         $message = PGPEditor::getInstance()->expressionToStatement($string);
       }
@@ -180,15 +198,33 @@ function development_extract_message($item, $index) {
   }
 }
 
-function development_get_value($operand, $item, $delete = TRUE) {
-  cdp($item->print_r());
+/**
+ * Returns the array or assignment statement with replacement values for t().
+ *
+ * @param PGPFunctionCall $operand
+ * @param object $item
+ *   The replacement values parameter to the t() call.
+ *
+ * @return object
+ *   The replacement values parameter (if an array) or the most recent
+ *   assignment statement to the replacement variable.
+ */
+function development_get_value($operand, $item) {
+//  cdp(__FUNCTION__);
   if (is_a($item, 'PGPOperand') && $item->findNode('type') == T_VARIABLE) {
-    $statement = $operand->parent->container->searchBackward('PGPAssignment', 'values', 0, $item->findNode('value'));
-    cdp($statement);
-    return $statement;
-//     $variable = $operand->findNode('value');
+    cdp('operand is a T_VARIABLE');
+    clp('operand is a T_VARIABLE');
+    // The replacement values parameter is a variable.
+    // Find the most recent assignment to this variable and return it.
+    // (Note: this search is limited to the function containing the assertion.)
+    // Opportunistically hope for a single assignment to the variable, e.g.
+    // $replacements = array('key1' => 'value1, ...);
+    $statement = $operand->parent->container->searchBackward('PGPAssignment', 'values', 0, $item->findNode('value'), $operand->parent);
+    cdp($statement->toString(), '$statement');
+    return $statement ? $statement : $item;
   }
   else {
+    // The replacement values parameter is an array.
     return $item;
   }
 }
