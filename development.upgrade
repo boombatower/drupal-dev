@@ -9,8 +9,11 @@
  *   The object containing the grammar statements of the file to convert.
  */
 function development_upgrade_file_alter(&$reader) {
-  $items = &$reader->getFunctionCalls();
-  foreach ($items as &$item) {
+  // Get list of function calls (including the calls to class methods).
+  $nodes = &$reader->getFunctionCalls();
+  foreach ($nodes as &$node) {
+    // Get the function call object.
+    $item = &$node->data;
     if (!isset($item) || !is_object($item) || !is_a($item, 'PGPFunctionCall') || $item->type != T_FUNCTION_CALL) {
       // The reference could have been changed in another routine so that it
       // no longer refers to an ojbect.
