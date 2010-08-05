@@ -197,6 +197,7 @@ function development_extract_message($item, $index) {
             $i++;
           }
         }
+        $string = str_replace(array("'' .", ". ''"), '', $string);
         $message = PGPEditor::getInstance()->expressionToStatement($string);
       }
 
