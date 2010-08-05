@@ -161,8 +161,11 @@ function development_extract_message($item, $index) {
   if ($parameter = $item->getParameter($index)) {
     $operand = $parameter->findNode('operand');
     if (is_a($operand, 'PGPFunctionCall') && is_array($operand->name) && $operand->name['value'] == 't') {
+      // Grab the message text to the t() call.
+      $message = $operand->getParameter();
+
       if ($operand->parameterCount() > 1) {
-        $message = $operand->getParameter();
+        // There are replacement parameters to the t() function.
         $string = $operand->printParameter();
         $delimiter = $string[0];
 
@@ -195,8 +198,10 @@ function development_extract_message($item, $index) {
           }
         }
         $message = PGPEditor::getInstance()->expressionToStatement($string);
-        $item->setParameter($index, $message);
       }
+
+      // Set the assert function call parameter to the message text.
+      $item->setParameter($index, $message);
     }
   }
 }
