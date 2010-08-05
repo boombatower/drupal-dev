@@ -115,40 +115,42 @@ function development_convert_asserts(&$item, &$reader, &$name) {
     return;
   }
 
+  $indices = array();
+
   // Determine the assertion format.
   if (in_array($name, $zero_single)) {
     // Format: message.
-    $params = array(0);
+    $indices = array(0);
   }
   elseif (in_array($name, $zero_normal)) {
     // Format: message, group.
-    $params = array(0, 1);
+    $indices = array(0, 1);
   }
   elseif (in_array($name, $two)) {
     // Format: p1, p2, message, group.
-    $params = array(2, 3);
+    $indices = array(2, 3);
   }
   elseif (in_array($name, $four)) {
     // Format: p1, p2, p3, p4, message, group.
-    $params = array(4, 5);
+    $indices = array(4, 5);
   }
   elseif (strpos($name, 'assert') === 0) {
     // Format: p1, message, group.
-    $params = array(1, 2);
+    $indices = array(1, 2);
   }
 
   // Check if the function call is a recognized assertion.
-  if (!empty($params)) {
+  if (!empty($indices)) {
     // Cycle through the parameter indices to check, based on the assertion
     // format, and run the message extraction process.
-    foreach ($params as $param) {
-      development_extract_message($item, $param);
+    foreach ($indices as $index) {
+      development_extract_message($item, $index);
     }
   }
 }
 
 /**
-* Check parameter at index for a wrapping t() function and remove if present.
+* Removes any wrapping t() function from the parameter at index.
 *
 * @param $item
 *   PGP function call object.
@@ -157,17 +159,16 @@ function development_convert_asserts(&$item, &$reader, &$name) {
 */
 function development_extract_message($item, $index) {
   if ($parameter = $item->getParameter($index)) {
-    $operand = $parameter->getElement();
+    $operand = $parameter->findNode('operand');
     if (is_a($operand, 'PGPFunctionCall') && is_array($operand->name) && $operand->name['value'] == 't') {
-      $message = $operand->getParameter();
-
-      if ($operand->parameters->count() > 1) {
+      if ($operand->parameterCount() > 1) {
+        $message = $operand->getParameter();
         $string = $operand->printParameter();
         $delimiter = $string[0];
 
-        $args = development_get_value($operand, $operand->getParameter(1)->getElement());
+        $args = development_get_value($operand, $operand->getParameter(1)->findNode('operand'));
         if (is_a($args, 'PGPAssignment')) {
-          $variable = $operand->getParameter(1)->getElement()->stripComments()->toString();
+          $variable = $operand->getParameter(1)->findNode('operand')->stripComments()->toString();
 
           $expression = $args->values->getElement();
           $replacements = $expression->getType('operand', 2); // The operand after the assignment operator.
@@ -194,9 +195,8 @@ function development_extract_message($item, $index) {
           }
         }
         $message = PGPEditor::getInstance()->expressionToStatement($string);
+        $item->setParameter($index, $message);
       }
-
-      $item->setParameter($index, $message);
     }
   }
 }
@@ -222,12 +222,14 @@ function development_get_value($operand, $item) {
     // (Note: this search is limited to the function containing the assertion.)
     // Opportunistically hope for a single assignment to the variable, e.g.
     // $replacements = array('key1' => 'value1, ...);
-    $statement = $operand->parent->container->searchBackward('PGPAssignment', 'values', 0, $item->findNode('value'), $operand->parent);
-    cdp($statement->toString(), '$statement');
+    // Set current to avoid messing with the value of $operand->parent which causes failure.
+    $current = $operand->parent;
+    $statement = $operand->parent->container->searchBackward('PGPAssignment', 'values', 0, $item->findNode('value'), $current);
+//    cdp($statement->toString(), '$statement');
     return $statement ? $statement : $item;
   }
   else {
-    // The replacement values parameter is an array.
+    // Hopefully, the replacement values parameter is an array.
     return $item;
   }
 }
