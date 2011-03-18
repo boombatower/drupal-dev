@@ -1,6 +1,6 @@
-; $Id$
 name = Development
-description = ...
+description = Remove t() calls from Drupal core test files.
 package = Development
-files[] = development.module
+;files[] = development.module
+;files[] = development.upgrade
 core = 7.x

@@ -1,5 +1,8 @@
 <?php
-// $Id$
+/**
+ * @file
+ * Provides primary Drupal hook implementations.
+ */
 
 /**
  * Implements hook_upgrade_info().

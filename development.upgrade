@@ -1,4 +1,10 @@
 <?php
+/**
+ * @file
+ * Provides an upgrade routine to remove t() calls from Drupal core test files.
+ *
+ * @author Jim Berry ("solotandem", http://drupal.org/user/240748)
+ */
 
 /**
  * Implements hook_upgrade_file_alter().
@@ -9,6 +15,27 @@
  *   The object containing the grammar statements of the file to convert.
  */
 function development_upgrade_file_alter(&$reader) {
+  global $testTaxonomyUpgrade;
+  $testTaxonomyUpgrade = FALSE;
+
+  // Get list of functions.
+  $nodes = &$reader->getFunctions();
+  foreach ($nodes as &$node) {
+    // Get the function call object.
+    $item = &$node->data;
+    if (!isset($item) || !is_object($item) || !is_a($item, 'PGPClass') || $item->type != T_FUNCTION) {
+      // The reference could have been changed in another routine so that it
+      // no longer refers to an object.
+      continue;
+    }
+
+    if (is_string($item->name) && $item->name == 'testTaxonomyUpgrade') {
+      // Set flag if on testTaxonomyUpgrade.
+      $testTaxonomyUpgrade = TRUE;
+      break;
+    }
+  }
+
   // Get list of function calls (including the calls to class methods).
   $nodes = &$reader->getFunctionCalls();
   foreach ($nodes as &$node) {
@@ -16,7 +43,7 @@ function development_upgrade_file_alter(&$reader) {
     $item = &$node->data;
     if (!isset($item) || !is_object($item) || !is_a($item, 'PGPFunctionCall') || $item->type != T_FUNCTION_CALL) {
       // The reference could have been changed in another routine so that it
-      // no longer refers to an ojbect.
+      // no longer refers to an object.
       continue;
     }
 
@@ -175,8 +202,26 @@ function development_extract_message($item, $index) {
 
           $expression = $args->values->getElement();
           $replacements = $expression->getType('operand', 2); // The operand after the assignment operator.
+
+          // Fix for upgrade.taxonomy.test that assigns $args['%old_vid'] = $last_rev->vid;
+          // Copied from coder_upgrade_convert_return().
+          $assign_variable = $expression->getType('operand')->stripComments();
+          $depth = $assign_variable->countType('index');
+          if ($depth > 0) {
+            $replacements = development_reconstruct_array($assign_variable, $replacements);
+            $replacements = $replacements->getElement();
+            clp('WARNING: Replacement argument exists for t() but not all may have been found. Manual changes may be needed.');
+            // Insert a comment before the statement containing the function call.
+            $statement = PGPEditor::getInstance()->commentToStatement("// TODO One or more of the replacement values for the removed call to t() may need to be manually set.");
+            $operand->insertStatementBefore($statement);
+          }
+
           if ($replacements) {
             $i = 0;
+            if (!is_a($replacements, 'PGPArray')) {
+              clp($replacements, __FUNCTION__ . ': not an array');
+              return;
+            }
             while ($key = $replacements->getKey($i)) {
 //              cdp($key, '$key');
               $key = str_replace(array("'", '"'), '', $key->toString());
@@ -196,6 +241,12 @@ function development_extract_message($item, $index) {
             $string = str_replace($key, "$delimiter . " . $value . " . $delimiter", $string);
             $i++;
           }
+        }
+        else {
+          clp('WARNING: Replacement argument exists for t() but array value not found. Manual changes are needed.');
+          // Insert a comment before the statement containing the function call.
+          $statement = PGPEditor::getInstance()->commentToStatement("// TODO The replacement values for the removed call to t() need to be manually set as the array value was not found in the closest list of statements.");
+          $operand->insertStatementBefore($statement);
         }
         $string = str_replace(array("'' .", ". ''"), '', $string);
         $message = PGPEditor::getInstance()->expressionToStatement($string);
@@ -219,10 +270,11 @@ function development_extract_message($item, $index) {
  *   assignment statement to the replacement variable.
  */
 function development_get_value($operand, $item) {
+  global $testTaxonomyUpgrade;
 //  cdp(__FUNCTION__);
   if (is_a($item, 'PGPOperand') && $item->findNode('type') == T_VARIABLE) {
-    cdp('operand is a T_VARIABLE');
-    clp('operand is a T_VARIABLE');
+//     cdp('operand is a T_VARIABLE');
+//     clp('operand is a T_VARIABLE');
     // The replacement values parameter is a variable.
     // Find the most recent assignment to this variable and return it.
     // (Note: this search is limited to the function containing the assertion.)
@@ -231,11 +283,90 @@ function development_get_value($operand, $item) {
     // Set current to avoid messing with the value of $operand->parent which causes failure.
     $current = $operand->parent;
     $statement = $operand->parent->container->searchBackward('PGPAssignment', 'values', 0, $item->findNode('value'), $current);
+    if ($testTaxonomyUpgrade && (!$statement || development_array_index_check($statement))) {
+      $statement = development_test_hack();
+    }
 //    cdp($statement->toString(), '$statement');
     return $statement ? $statement : $item;
   }
   else {
     // Hopefully, the replacement values parameter is an array.
+    !is_a($item, 'PGPArray') ? clp($item, __FUNCTION__ . ': not an array') : '';
     return $item;
   }
+}
+
+/**
+ * Returns array with another level whose key is from assignment variable.
+ *
+ * @param PGPExpression $variable
+ *   The assignment variable (left of assignment operator).
+ * @param PGPExpression $value
+ *   The assignment value (right of assignment operator).
+ * @return PGPExpression
+ *   The new array expression.
+ *
+ * @see coder_upgrade_reconstruct_array()
+ */
+function development_reconstruct_array($variable, $value) {
+//   clp("inside " . __FUNCTION__);
+
+  if (($count = $variable->countType('index')) < 1) {
+    return new PGPExpression();
+  }
+
+  // Loop on indices in reverse order and reconstruct an array.
+  while ($count && ($index = $variable->getType('index', $count--)) !== FALSE) {
+    $key = trim($index->toString(), "'\"");
+    $array = PGPEditor::getInstance()->expressionToStatement("array('$key' => {$value->toString()})");
+    $value = $array; // Set this in case we loop again.
+  }
+//   clp($array->toString(), '$array');
+  return $array;
+}
+
+/**
+ * Returns TRUE if assignment variable includes array indices.
+ *
+ * Fix for upgrade.taxonomy.test that assigns $args['%old_vid'] = $last_rev->vid;
+ * Copied from coder_upgrade_convert_return()
+ *
+ * @see UpgradePathTaxonomyTestCase
+ */
+function development_array_index_check($statement) {
+  $expression = $statement->values->getElement();
+  $assign_variable = $expression->getType('operand')->stripComments();
+  $depth = $assign_variable->countType('index');
+  if ($depth > 0) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+/**
+ * Returns the replacement array for a single test class.
+ *
+ * This is the only place in all core test code that sets the replacement array
+ * in a variable outside the closest group of statements that include the assert
+ * statement. Currently, the parser's searchBackward() routine restricts itself
+ * to the list of statements that include the current assert. In this case, the
+ * list only includes those in the surrounding conditional block.
+ *
+ * @see UpgradePathTaxonomyTestCase
+ */
+function development_test_hack() {
+  static $statement = NULL;
+
+  if (!isset($statement)) {
+    $statement = PGPEditor::getInstance()->textToStatements(
+    "\$args = array(
+      '%name' => \$term->name,
+      '@field' => \$field_class,
+      '%nid' => \$nid,
+      '%old_vid' => \$last_rev->vid,
+    );"
+    )->getElement(0);
+//     clp($statement, '$statement');
+  }
+  return $statement;
 }
