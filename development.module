@@ -13,6 +13,7 @@ function development_upgrade_info() {
   $upgrade = array(
     'title' => t('SimpleTest remove t() from assert message, test getInfo(), etc (parser routines)'),
     'link' => 'http://drupal.org/node/500866',
+    'module' => 'development',
   );
   return array('development' => $upgrade);
 }
